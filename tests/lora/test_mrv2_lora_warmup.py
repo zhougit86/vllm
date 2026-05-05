@@ -74,12 +74,16 @@ def test_mrv2_lora_warmup_activates_dummy_loras():
         import vllm.distributed.parallel_state as parallel_state
         
         # We need a minimal distributed env
-        if not parallel_state.is_initialized():
+        if not torch.distributed.is_initialized():
             parallel_state.init_distributed_environment(
                 world_size=1,
                 rank=0,
                 local_rank=0,
                 distributed_init_method=f"file://{tempfile.mkstemp()[1]}"
+            )
+            parallel_state.initialize_model_parallel(
+                tensor_model_parallel_size=1,
+                pipeline_model_parallel_size=1,
             )
 
         runner = MRV2GPUModelRunner(vllm_config, torch.device("cuda:0"))
