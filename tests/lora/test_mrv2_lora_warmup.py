@@ -123,6 +123,17 @@ def test_mrv2_lora_warmup_activates_dummy_loras():
         assert found_dummy_loras, "No dummy LoRAs were activated in any of the calls"
         
     # 2. Test capture_model (CUDA graph capture)
+    # The cudagraph_manager is usually initialized in init_attn_backend
+    # but we can just initialize it directly for the test if it's missing
+    if getattr(runner, 'cudagraph_manager', None) is None:
+        from vllm.v1.worker.gpu.cudagraph_utils import ModelCudaGraphManager
+        runner.cudagraph_manager = ModelCudaGraphManager(
+            vllm_config,
+            model_config.max_model_len,
+            runner.device,
+            None # we can pass None for attn_backend in this mock test
+        )
+
     with patch.object(runner, '_set_active_loras', wraps=runner._set_active_loras) as mock_set_active:
         runner.capture_model()
         
