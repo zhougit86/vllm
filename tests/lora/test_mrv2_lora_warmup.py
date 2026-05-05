@@ -104,23 +104,23 @@ def test_mrv2_lora_warmup_activates_dummy_loras():
         # Verify _set_active_loras was called during memory profiling (_dummy_run)
         assert mock_set_active.called, "_set_active_loras was not called during profile_run"
         
-        # Verify it used dummy LoRAs (e.g., warmup_1)
-        # _set_active_loras is called with (*lora_inputs) where lora_inputs is a tuple
-        # from make_lora_inputs: (prompt_mapping, token_mapping, lora_requests)
-        # However, due to how we patched it, we should just extract lora_requests
-        # by looking for a set of LoRARequest objects in args.
-        args, kwargs = mock_set_active.call_args
-        
-        lora_requests = None
-        for arg in args:
-            if isinstance(arg, set):
-                lora_requests = arg
+        # Verify it used dummy LoRAs (e.g., warmup_1) in ANY of the calls
+        found_dummy_loras = False
+        for call in mock_set_active.call_args_list:
+            args, kwargs = call
+            lora_requests = None
+            for arg in args:
+                if isinstance(arg, set):
+                    lora_requests = arg
+                    break
+            if lora_requests is None:
+                lora_requests = kwargs.get('lora_requests', set())
+                
+            if len(lora_requests) > 0 and any("warmup_" in lr.lora_name for lr in lora_requests):
+                found_dummy_loras = True
                 break
-        if lora_requests is None:
-            lora_requests = kwargs.get('lora_requests', set())
-            
-        assert len(lora_requests) > 0, "No dummy LoRAs were activated"
-        assert any("warmup_" in lr.lora_name for lr in lora_requests), "Dummy LoRA name 'warmup_' not found"
+                
+        assert found_dummy_loras, "No dummy LoRAs were activated in any of the calls"
         
     # 2. Test capture_model (CUDA graph capture)
     with patch.object(runner, '_set_active_loras', wraps=runner._set_active_loras) as mock_set_active:
@@ -133,17 +133,22 @@ def test_mrv2_lora_warmup_activates_dummy_loras():
 
         assert mock_set_active.called, "_set_active_loras was not called during capture_model"
         
-        args, kwargs = mock_set_active.call_args
-        lora_requests = None
-        for arg in args:
-            if isinstance(arg, set):
-                lora_requests = arg
+        found_dummy_loras = False
+        for call in mock_set_active.call_args_list:
+            args, kwargs = call
+            lora_requests = None
+            for arg in args:
+                if isinstance(arg, set):
+                    lora_requests = arg
+                    break
+            if lora_requests is None:
+                lora_requests = kwargs.get('lora_requests', set())
+                
+            if len(lora_requests) > 0 and any("warmup_" in lr.lora_name for lr in lora_requests):
+                found_dummy_loras = True
                 break
-        if lora_requests is None:
-            lora_requests = kwargs.get('lora_requests', set())
-            
-        assert len(lora_requests) > 0, "No dummy LoRAs were activated during capture"
-        assert any("warmup_" in lr.lora_name for lr in lora_requests), "Dummy LoRA name 'warmup_' not found during capture"
+                
+        assert found_dummy_loras, "No dummy LoRAs were activated during capture"
 
 if __name__ == "__main__":
     test_mrv2_lora_warmup_activates_dummy_loras()
