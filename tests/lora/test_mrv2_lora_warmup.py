@@ -95,6 +95,12 @@ def test_mrv2_lora_warmup_activates_dummy_loras():
     with patch.object(runner, '_set_active_loras', wraps=runner._set_active_loras) as mock_set_active:
         runner.profile_run()
         
+        # Print all calls to _set_active_loras to debug
+        print(f"\n[DEBUG] _set_active_loras called {mock_set_active.call_count} times during profile_run")
+        for i, call in enumerate(mock_set_active.call_args_list):
+            print(f"[DEBUG] Call {i} args: {call.args}")
+            print(f"[DEBUG] Call {i} kwargs: {call.kwargs}")
+        
         # Verify _set_active_loras was called during memory profiling (_dummy_run)
         assert mock_set_active.called, "_set_active_loras was not called during profile_run"
         
@@ -120,6 +126,11 @@ def test_mrv2_lora_warmup_activates_dummy_loras():
     with patch.object(runner, '_set_active_loras', wraps=runner._set_active_loras) as mock_set_active:
         runner.capture_model()
         
+        print(f"\n[DEBUG] _set_active_loras called {mock_set_active.call_count} times during capture_model")
+        for i, call in enumerate(mock_set_active.call_args_list):
+            print(f"[DEBUG] Call {i} args: {call.args}")
+            print(f"[DEBUG] Call {i} kwargs: {call.kwargs}")
+
         assert mock_set_active.called, "_set_active_loras was not called during capture_model"
         
         args, kwargs = mock_set_active.call_args
