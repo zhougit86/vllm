@@ -127,12 +127,17 @@ def test_mrv2_lora_warmup_activates_dummy_loras():
     # but we can just initialize it directly for the test if it's missing
     if getattr(runner, 'cudagraph_manager', None) is None:
         from vllm.v1.worker.gpu.cudagraph_utils import ModelCudaGraphManager
+        from vllm.compilation.config import CUDAGraphMode
+        # Ensure capture sizes are populated so needs_capture() is true
+        if not vllm_config.compilation_config.cudagraph_capture_sizes:
+            vllm_config.compilation_config.cudagraph_capture_sizes = [1, 2, 4, 8, 16, 32]
         runner.cudagraph_manager = ModelCudaGraphManager(
             vllm_config,
             runner.device,
-            None, # cudagraph_mode
+            CUDAGraphMode.FULL, # Must use a mode that triggers capture
             1 # decode_query_len
         )
+        print(f"\n[DEBUG] cudagraph_manager needs_capture: {runner.cudagraph_manager.needs_capture()}")
 
     with patch.object(runner, '_set_active_loras', wraps=runner._set_active_loras) as mock_set_active:
         runner.capture_model()
