@@ -92,7 +92,7 @@ def test_mrv2_lora_warmup_activates_dummy_loras():
         # 1. Test profile_run (which calls _dummy_run)
         # Note: We need to initialize kv cache after load_model and before profile_run
         # because profile_run needs to use block_tables
-        from vllm.v1.kv_cache_interface import get_kv_cache_configs
+        from vllm.v1.core.kv_cache_utils import get_kv_cache_configs
         from vllm.platforms import current_platform
         current_platform.update_block_size_for_backend(vllm_config)
         kv_cache_spec = runner.get_kv_cache_spec()
