@@ -88,10 +88,22 @@ def test_mrv2_lora_warmup_activates_dummy_loras():
 
         runner = MRV2GPUModelRunner(vllm_config, torch.device("cuda:0"))
         runner.load_model()
+        
+        # 1. Test profile_run (which calls _dummy_run)
+        # Note: We need to initialize kv cache after load_model and before profile_run
+        # because profile_run needs to use block_tables
+        from vllm.v1.kv_cache_interface import get_kv_cache_configs
+        from vllm.platforms import current_platform
+        current_platform.update_block_size_for_backend(vllm_config)
+        kv_cache_spec = runner.get_kv_cache_spec()
+        available_memory = 1 * 1024**3 # 1 GB
+        kv_cache_config = get_kv_cache_configs(
+            vllm_config, [kv_cache_spec], [available_memory]
+        )[0]
+        runner.initialize_kv_cache(kv_cache_config)
 
     assert hasattr(runner, 'cudagraph_manager'), "Ensure this runner supports MRV2 architecture"
-    
-    # 1. Test profile_run (which calls _dummy_run)
+
     with patch.object(runner, '_set_active_loras', wraps=runner._set_active_loras) as mock_set_active:
         runner.profile_run()
         
@@ -123,21 +135,13 @@ def test_mrv2_lora_warmup_activates_dummy_loras():
         assert found_dummy_loras, "No dummy LoRAs were activated in any of the calls"
         
     # 2. Test capture_model (CUDA graph capture)
-    # The cudagraph_manager is usually initialized in init_attn_backend
-    # but we can just initialize it directly for the test if it's missing
-    if getattr(runner, 'cudagraph_manager', None) is None:
-        from vllm.v1.worker.gpu.cudagraph_utils import ModelCudaGraphManager
-        from vllm.config.compilation import CUDAGraphMode
-        # Ensure capture sizes are populated so needs_capture() is true
-        if not vllm_config.compilation_config.cudagraph_capture_sizes:
-            vllm_config.compilation_config.cudagraph_capture_sizes = [1, 2, 4, 8, 16, 32]
-        runner.cudagraph_manager = ModelCudaGraphManager(
-            vllm_config,
-            runner.device,
-            CUDAGraphMode.FULL, # Must use a mode that triggers capture
-            1 # decode_query_len
-        )
-        print(f"\n[DEBUG] cudagraph_manager needs_capture: {runner.cudagraph_manager.needs_capture()}")
+    # Ensure capture sizes are populated so needs_capture() is true
+    if not vllm_config.compilation_config.cudagraph_capture_sizes:
+        vllm_config.compilation_config.cudagraph_capture_sizes = [1, 2, 4, 8, 16, 32]
+        # Re-evaluate needs_capture since we modified the config
+        runner.cudagraph_manager._init_candidates()
+        
+    print(f"\n[DEBUG] cudagraph_manager needs_capture: {runner.cudagraph_manager.needs_capture()}")
 
     with patch.object(runner, '_set_active_loras', wraps=runner._set_active_loras) as mock_set_active:
         runner.capture_model()
