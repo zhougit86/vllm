@@ -29,7 +29,7 @@ NUM_LORAS = 4
 DEVICE_TYPE = current_platform.device_type
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="Requires CUDA")
-@patch.dict(os.environ, {"RANK": "0"})
+@patch.dict(os.environ, {"RANK": "0", "VLLM_USE_V1": "1"})
 def test_mrv2_lora_warmup_activates_dummy_loras():
     model_config = ModelConfig(
         MODEL_PATH,
