@@ -129,9 +129,9 @@ def test_mrv2_lora_warmup_activates_dummy_loras():
         from vllm.v1.worker.gpu.cudagraph_utils import ModelCudaGraphManager
         runner.cudagraph_manager = ModelCudaGraphManager(
             vllm_config,
-            model_config.max_model_len,
             runner.device,
-            None # we can pass None for attn_backend in this mock test
+            None, # cudagraph_mode
+            1 # decode_query_len
         )
 
     with patch.object(runner, '_set_active_loras', wraps=runner._set_active_loras) as mock_set_active:
