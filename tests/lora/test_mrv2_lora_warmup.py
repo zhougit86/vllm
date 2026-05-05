@@ -67,28 +67,29 @@ def test_mrv2_lora_warmup_activates_dummy_loras():
         ),
     )
 
-    # Note: Using Worker to properly initialize the device and distributed environment
-    # The worker initializes the v1 GPUModelRunner
-    worker = Worker(
-        vllm_config=vllm_config,
-        local_rank=0,
-        rank=0,
-        distributed_init_method=f"file://{tempfile.mkstemp()[1]}",
-    )
-    
     with set_current_vllm_config(vllm_config):
-        worker.init_device()
-        worker.load_model()
-    
-    runner = worker.model_runner
-    # The worker might wrap the runner or import the MRV1 runner by default.
-    # To be absolutely sure we test MRV2, we can check if it has the V2 specific attributes
-    # or just trust the worker's initialization if it's using the v1/worker/gpu_worker.py
+        # Instead of going through Worker, which might have complex routing
+        # for MRV1 vs MRV2, we initialize the MRV2 runner directly.
+        from vllm.distributed import get_tensor_model_parallel_world_size
+        import vllm.distributed.parallel_state as parallel_state
+        
+        # We need a minimal distributed env
+        if not parallel_state.is_initialized():
+            parallel_state.init_distributed_environment(
+                world_size=1,
+                rank=0,
+                local_rank=0,
+                distributed_init_method=f"file://{tempfile.mkstemp()[1]}"
+            )
+
+        runner = MRV2GPUModelRunner(vllm_config, torch.device("cuda:0"))
+        runner.load_model()
+
     assert hasattr(runner, 'cudagraph_manager'), "Ensure this runner supports MRV2 architecture"
     
     # 1. Test profile_run (which calls _dummy_run)
     with patch.object(runner, '_set_active_loras', wraps=runner._set_active_loras) as mock_set_active:
-        worker.profile_num_available_blocks(16, 16, 16)
+        runner.profile_run()
         
         # Verify _set_active_loras was called during memory profiling (_dummy_run)
         assert mock_set_active.called, "_set_active_loras was not called during profile_run"
