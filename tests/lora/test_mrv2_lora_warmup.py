@@ -99,13 +99,20 @@ def test_mrv2_lora_warmup_activates_dummy_loras():
         assert mock_set_active.called, "_set_active_loras was not called during profile_run"
         
         # Verify it used dummy LoRAs (e.g., warmup_1)
-        # _set_active_loras signature: (self, prompt_lora_mapping, token_lora_mapping, lora_requests, mapping_type)
-        # So when called as method, lora_requests is args[2] or kwargs['lora_requests']
+        # _set_active_loras is called with (*lora_inputs) where lora_inputs is a tuple
+        # from make_lora_inputs: (prompt_mapping, token_mapping, lora_requests)
+        # However, due to how we patched it, we should just extract lora_requests
+        # by looking for a set of LoRARequest objects in args.
         args, kwargs = mock_set_active.call_args
-        if len(args) >= 3:
-            lora_requests = args[2]
-        else:
+        
+        lora_requests = None
+        for arg in args:
+            if isinstance(arg, set):
+                lora_requests = arg
+                break
+        if lora_requests is None:
             lora_requests = kwargs.get('lora_requests', set())
+            
         assert len(lora_requests) > 0, "No dummy LoRAs were activated"
         assert any("warmup_" in lr.lora_name for lr in lora_requests), "Dummy LoRA name 'warmup_' not found"
         
@@ -116,10 +123,14 @@ def test_mrv2_lora_warmup_activates_dummy_loras():
         assert mock_set_active.called, "_set_active_loras was not called during capture_model"
         
         args, kwargs = mock_set_active.call_args
-        if len(args) >= 3:
-            lora_requests = args[2]
-        else:
+        lora_requests = None
+        for arg in args:
+            if isinstance(arg, set):
+                lora_requests = arg
+                break
+        if lora_requests is None:
             lora_requests = kwargs.get('lora_requests', set())
+            
         assert len(lora_requests) > 0, "No dummy LoRAs were activated during capture"
         assert any("warmup_" in lr.lora_name for lr in lora_requests), "Dummy LoRA name 'warmup_' not found during capture"
 
