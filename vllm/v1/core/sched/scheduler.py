@@ -480,7 +480,7 @@ class Scheduler(SchedulerInterface):
             req_index += 1
 
             # Speculative decode related.
-            if request.spec_token_ids:
+            if request.spec_token_ids and not request.is_prefill_chunk:
                 num_scheduled_spec_tokens = (
                     num_new_tokens
                     + request.num_computed_tokens
