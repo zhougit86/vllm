@@ -987,6 +987,12 @@ def apply_top_k_top_p_triton(
     assert logits.ndim == 2
     assert logits.dtype == torch.float32
 
+    # The Triton kernel computes each row pointer as
+    # `base + row_id * VOCAB_SIZE`, so it requires contiguous logits.
+    # Upstream slicing can legally produce non-contiguous [B, V] views.
+    if not logits.is_contiguous():
+        logits = logits.contiguous()
+
     batch_size, vocab_size = logits.shape
 
     topk_enabled = k is not None
