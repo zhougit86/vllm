@@ -93,6 +93,7 @@ def _update_min_larger_stats(data, above_mask, min_larger, num_min_larger, senti
 @triton.jit
 def _topk_topp_kernel(
     LOGITS,
+    LOGITS_STRIDE_0,
     BUFFER,
     PERCENTILE_TO_STD_TABLE,
     NORMAL_CDF_TO_SIGMA_TABLE,
@@ -110,7 +111,7 @@ def _topk_topp_kernel(
     pid = tl.program_id(0)
     num_programs = tl.num_programs(0)
     for row_id in tl.range(pid, BATCH_SIZE, num_programs):
-        LOGITS_ROW = LOGITS + row_id * VOCAB_SIZE
+        LOGITS_ROW = LOGITS + row_id * LOGITS_STRIDE_0
         BUFFER_ROW = BUFFER + pid * VOCAB_SIZE
 
         final_pivot = -float("inf")
@@ -986,20 +987,21 @@ def apply_top_k_top_p_triton(
     """
     assert logits.ndim == 2
     assert logits.dtype == torch.float32
-
-    # The Triton kernel computes each row pointer as
-    # `base + row_id * VOCAB_SIZE`, so it requires contiguous logits.
-    # Upstream slicing can legally produce non-contiguous [B, V] views.
-    if not logits.is_contiguous():
-        logits = logits.contiguous()
-
     batch_size, vocab_size = logits.shape
-
     topk_enabled = k is not None
     topp_enabled = p is not None
 
     if batch_size == 0 or not (topk_enabled or topp_enabled):
         return logits
+
+    copied_back = False
+    original_logits = logits
+
+    # The Triton kernel supports arbitrary row strides, but it still assumes
+    # the vocab dimension is laid out contiguously within each row.
+    if logits.stride(1) != 1:
+        logits = logits.contiguous()
+        copied_back = True
 
     if k is not None:
         assert k.ndim == 1 and k.shape[0] == batch_size
@@ -1040,6 +1042,7 @@ def apply_top_k_top_p_triton(
 
     _topk_topp_kernel[(NUM_PROGRAMS,)](
         logits,
+        logits.stride(0),
         buffer,
         percentile_to_std_table,
         normal_cdf_to_sigma_table,
@@ -1053,6 +1056,10 @@ def apply_top_k_top_p_triton(
         TOPK_ENABLED=topk_enabled,
         TOPP_ENABLED=topp_enabled,
     )
+
+    if copied_back:
+        original_logits.copy_(logits)
+        return original_logits
 
     return logits
 
