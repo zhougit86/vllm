@@ -1080,12 +1080,13 @@ def test_spec_tokens_not_scheduled_after_streaming_session_rebuild():
     assert req.num_output_placeholders == 0
     assert req.allow_async_spec_reuse is False
 
+    expected_without_spec = req.num_tokens - req.num_computed_tokens
     req.spec_token_ids = [7, 8, 9]
     req.is_prefill_chunk = False
 
     output = scheduler.schedule()
 
-    assert output.num_scheduled_tokens[req.request_id] == 1
+    assert output.num_scheduled_tokens[req.request_id] == expected_without_spec
     assert req.request_id not in output.scheduled_spec_decode_tokens
 
 
