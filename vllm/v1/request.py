@@ -143,6 +143,9 @@ class Request:
         self.discard_latest_async_tokens = False
 
         self.spec_token_ids: list[int] = []
+        # Session rebuild can temporarily invalidate async speculative carry-over.
+        # Only re-enable it after real draft tokens arrive for the renewed state.
+        self.allow_async_spec_reuse = True
         self.num_computed_tokens = 0
         self.cache_salt: str | None = cache_salt
 

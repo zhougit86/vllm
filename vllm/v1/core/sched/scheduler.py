@@ -480,7 +480,27 @@ class Scheduler(SchedulerInterface):
             req_index += 1
 
             # Speculative decode related.
-            if request.spec_token_ids and not request.is_prefill_chunk:
+            if request.spec_token_ids:
+                if request.is_prefill_chunk or not request.allow_async_spec_reuse:
+                    logger.error(
+                        "[DEBUG-stream-session] skip_spec_schedule req_id=%s "
+                        "spec_len=%d is_prefill_chunk=%s allow_async_spec_reuse=%s "
+                        "num_new_tokens=%d num_computed_tokens=%d num_tokens=%d "
+                        "placeholders=%d",
+                        request.request_id,
+                        len(request.spec_token_ids),
+                        request.is_prefill_chunk,
+                        request.allow_async_spec_reuse,
+                        num_new_tokens,
+                        request.num_computed_tokens,
+                        request.num_tokens,
+                        request.num_output_placeholders,
+                    )
+            if (
+                request.spec_token_ids
+                and not request.is_prefill_chunk
+                and request.allow_async_spec_reuse
+            ):
                 num_scheduled_spec_tokens = (
                     num_new_tokens
                     + request.num_computed_tokens
@@ -492,6 +512,14 @@ class Scheduler(SchedulerInterface):
                     if len(spec_token_ids) > num_scheduled_spec_tokens:
                         spec_token_ids = spec_token_ids[:num_scheduled_spec_tokens]
                     scheduled_spec_decode_tokens[request.request_id] = spec_token_ids
+                    logger.error(
+                        "[DEBUG-stream-session] schedule_spec req_id=%s spec_len=%d "
+                        "num_scheduled_spec_tokens=%d allow_async_spec_reuse=%s",
+                        request.request_id,
+                        len(spec_token_ids),
+                        num_scheduled_spec_tokens,
+                        request.allow_async_spec_reuse,
+                    )
 
                 # New spec tokens will be set in `update_draft_token_ids` before the
                 # next step when applicable.
@@ -986,9 +1014,22 @@ class Scheduler(SchedulerInterface):
 
         session._all_token_ids.extend(update.prompt_token_ids or ())
         session.prompt_token_ids.extend(update.prompt_token_ids or ())
+        logger.error(
+            "[DEBUG-stream-session] rebuild req_id=%s kept_output_len=%d "
+            "update_prompt_len=%d old_spec_len=%d old_placeholders=%d "
+            "num_computed_tokens=%d num_tokens=%d",
+            session.request_id,
+            len(kept_output_tokens),
+            len(update.prompt_token_ids or ()),
+            len(session.spec_token_ids),
+            session.num_output_placeholders,
+            session.num_computed_tokens,
+            session.num_tokens,
+        )
 
         session.spec_token_ids = []
         session.num_output_placeholders = 0
+        session.allow_async_spec_reuse = False
         # Update block hashes for the new tokens.
         session.update_block_hashes()
         session.num_prompt_tokens = len(session.prompt_token_ids)
@@ -1613,6 +1654,14 @@ class Scheduler(SchedulerInterface):
 
             if request.is_prefill_chunk:
                 # Ignore draft tokens for prefill chunks.
+                logger.error(
+                    "[DEBUG-stream-session] ignore_draft req_id=%s "
+                    "draft_len=%d is_prefill_chunk=%s allow_async_spec_reuse=%s",
+                    req_id,
+                    len(spec_token_ids),
+                    request.is_prefill_chunk,
+                    request.allow_async_spec_reuse,
+                )
                 if request.spec_token_ids:
                     request.spec_token_ids = []
                 continue
@@ -1621,7 +1670,19 @@ class Scheduler(SchedulerInterface):
             if self.structured_output_manager.should_advance(request):
                 metadata = request.structured_output_request
                 spec_token_ids = metadata.grammar.validate_tokens(spec_token_ids)  # type: ignore[union-attr]
+            logger.error(
+                "[DEBUG-stream-session] accept_draft req_id=%s draft_len=%d "
+                "num_computed_tokens=%d num_tokens=%d placeholders=%d "
+                "allow_async_spec_reuse_before=%s",
+                req_id,
+                len(spec_token_ids),
+                request.num_computed_tokens,
+                request.num_tokens,
+                request.num_output_placeholders,
+                request.allow_async_spec_reuse,
+            )
             request.spec_token_ids = spec_token_ids
+            request.allow_async_spec_reuse = True
 
     def update_draft_token_ids_in_output(
         self, draft_token_ids: DraftTokenIds, scheduler_output: SchedulerOutput
