@@ -33,7 +33,7 @@ from vllm.v1.kv_cache_interface import (
     KVCacheGroupSpec,
 )
 from vllm.v1.outputs import DraftTokenIds, KVConnectorOutput, ModelRunnerOutput
-from vllm.v1.request import Request, RequestStatus
+from vllm.v1.request import Request, RequestStatus, StreamingUpdate
 from vllm.v1.structured_output import StructuredOutputManager
 
 from .utils import EOS_TOKEN_ID, create_requests, create_scheduler, mock_kv
@@ -1041,7 +1041,7 @@ def test_no_spec_tokens_scheduled_for_prefill_chunks():
 
 def test_spec_tokens_not_scheduled_after_streaming_session_rebuild():
     scheduler = create_scheduler(
-        max_num_batched_tokens=64,
+        max_num_batched_tokens=128,
         num_speculative_tokens=3,
         enable_chunked_prefill=True,
     )
