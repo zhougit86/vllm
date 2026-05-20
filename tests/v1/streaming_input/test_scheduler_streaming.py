@@ -195,6 +195,7 @@ class TestStreamingScheduler(unittest.TestCase):
         assert session.prompt_token_ids == [1, 2, 3, 10, 4, 5]
         assert session.spec_token_ids == []
         assert session.num_output_placeholders == 0
+        assert session.allow_async_spec_reuse is False
         assert session.status == RequestStatus.WAITING
 
     def test_update_request_as_session_with_multimodal(self):

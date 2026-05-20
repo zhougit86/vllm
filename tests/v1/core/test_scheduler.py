@@ -1039,6 +1039,55 @@ def test_no_spec_tokens_scheduled_for_prefill_chunks():
     assert len(output.scheduled_spec_decode_tokens[req.request_id]) == num_spec_tokens
 
 
+def test_spec_tokens_not_scheduled_after_streaming_session_rebuild():
+    scheduler = create_scheduler(
+        max_num_batched_tokens=64,
+        num_speculative_tokens=3,
+        enable_chunked_prefill=True,
+    )
+    req = create_requests(num_requests=1, num_tokens=40, resumable=True)[0]
+    scheduler.add_request(req)
+
+    output = scheduler.schedule()
+    req_to_index = {req.request_id: 0}
+    model_runner_output = ModelRunnerOutput(
+        req_ids=[req.request_id],
+        req_id_to_index=req_to_index,
+        sampled_token_ids=[[42]],
+        logprobs=None,
+        prompt_logprobs_dict={},
+        pooler_output=[],
+    )
+    scheduler.update_from_output(output, model_runner_output)
+
+    draft_token_ids = DraftTokenIds([req.request_id], [[1, 2, 3]])
+    scheduler.update_draft_token_ids(draft_token_ids)
+    assert req.spec_token_ids == [1, 2, 3]
+    assert req.allow_async_spec_reuse is True
+
+    update_request = create_requests(
+        num_requests=1,
+        num_tokens=8,
+        request_ids=[req.request_id],
+        resumable=True,
+    )[0]
+    scheduler._update_request_as_session(
+        req, StreamingUpdate.from_request(update_request)
+    )
+
+    assert req.spec_token_ids == []
+    assert req.num_output_placeholders == 0
+    assert req.allow_async_spec_reuse is False
+
+    req.spec_token_ids = [7, 8, 9]
+    req.is_prefill_chunk = False
+
+    output = scheduler.schedule()
+
+    assert output.num_scheduled_tokens[req.request_id] == 1
+    assert req.request_id not in output.scheduled_spec_decode_tokens
+
+
 def test_scheduler_stats_waiting_queues():
     """Test that scheduler stats correctly report waiting and skipped_waiting queues."""
     # Create scheduler with limited capacity so we can have waiting requests
