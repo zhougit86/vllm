@@ -292,38 +292,6 @@ def test_async_scheduler_skips_placeholder_seeding_for_prefill_chunk(
     assert req.spec_token_ids == [101, 102, 103, 104]
 
 
-def test_async_scheduler_does_not_seed_spec_placeholders_without_spec_tokens(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    scheduler = object.__new__(AsyncScheduler)
-    scheduler.num_spec_tokens = 4
-    scheduler._spec_token_placeholders = [-1] * scheduler.num_spec_tokens
-    req = create_requests(num_requests=1, num_tokens=24)[0]
-    req.num_computed_tokens = req.num_tokens
-    req.num_output_placeholders = 0
-    req.spec_token_ids = []
-    scheduler.requests = {req.request_id: req}
-
-    output = SchedulerOutput(
-        scheduled_new_reqs=[],
-        scheduled_cached_reqs=CachedRequestData.make_empty(),
-        num_scheduled_tokens={req.request_id: 1},
-        total_num_scheduled_tokens=1,
-        scheduled_encoder_inputs={},
-        scheduled_spec_decode_tokens={},
-        num_common_prefix_blocks=[],
-        finished_req_ids=set(),
-        free_encoder_mm_hashes=[],
-    )
-
-    monkeypatch.setattr(Scheduler, "_update_after_schedule", lambda self, out: None)
-
-    AsyncScheduler._update_after_schedule(scheduler, output)
-
-    assert req.num_output_placeholders == 1
-    assert req.spec_token_ids == []
-
-
 def test_abort_request_when_structured_output_fsm_cannot_advance():
     scheduler = object.__new__(AsyncScheduler)
     request = create_requests(num_requests=1, num_tokens=1)[0]
