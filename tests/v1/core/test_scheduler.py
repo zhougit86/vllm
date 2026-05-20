@@ -1045,7 +1045,8 @@ def test_spec_tokens_not_scheduled_after_streaming_session_rebuild():
         num_speculative_tokens=3,
         enable_chunked_prefill=True,
     )
-    req = create_requests(num_requests=1, num_tokens=40, resumable=True)[0]
+    req = create_requests(num_requests=1, num_tokens=40)[0]
+    req.resumable = True
     scheduler.add_request(req)
 
     output = scheduler.schedule()
@@ -1068,9 +1069,9 @@ def test_spec_tokens_not_scheduled_after_streaming_session_rebuild():
     update_request = create_requests(
         num_requests=1,
         num_tokens=8,
-        request_ids=[req.request_id],
-        resumable=True,
+        req_ids=[req.request_id],
     )[0]
+    update_request.resumable = True
     scheduler._update_request_as_session(
         req, StreamingUpdate.from_request(update_request)
     )
