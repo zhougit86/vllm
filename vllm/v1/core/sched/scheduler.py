@@ -1437,6 +1437,8 @@ class Scheduler(SchedulerInterface):
                 num_draft_tokens = len(scheduled_spec_token_ids)
                 num_accepted = len(generated_token_ids) - 1
                 num_rejected = num_draft_tokens - num_accepted
+                old_num_computed_tokens = request.num_computed_tokens
+                old_num_output_placeholders = request.num_output_placeholders
                 # num_computed_tokens represents the number of tokens
                 # processed in the current step, considering scheduled
                 # tokens and rejections. If some tokens are rejected,
@@ -1448,6 +1450,22 @@ class Scheduler(SchedulerInterface):
                 # the scheduled spec tokens count and so is similarly adjusted.
                 if request.num_output_placeholders > 0:
                     request.num_output_placeholders -= num_rejected
+                logger.warning(
+                    "[DEBUG-spec-budget] update_from_output_spec req_id=%s "
+                    "scheduled_spec_len=%d generated_len=%d num_accepted=%d "
+                    "num_rejected=%d num_computed_tokens_before=%d "
+                    "num_computed_tokens_after=%d num_output_placeholders_before=%d "
+                    "num_output_placeholders_after=%d",
+                    req_id,
+                    num_draft_tokens,
+                    len(generated_token_ids),
+                    num_accepted,
+                    num_rejected,
+                    old_num_computed_tokens,
+                    request.num_computed_tokens,
+                    old_num_output_placeholders,
+                    request.num_output_placeholders,
+                )
                 spec_decoding_stats = self.make_spec_decoding_stats(
                     spec_decoding_stats,
                     num_draft_tokens=num_draft_tokens,
