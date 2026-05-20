@@ -363,11 +363,37 @@ class Scheduler(SchedulerInterface):
                 req_index += 1
                 continue
 
-            num_new_tokens = (
+            raw_num_new_tokens = (
                 request.num_tokens_with_spec
                 + request.num_output_placeholders
                 - request.num_computed_tokens
             )
+            suspicious_spec_budget = (
+                bool(request.spec_token_ids)
+                or request.num_output_placeholders > 0
+                or not request.allow_async_spec_reuse
+                or request.num_tokens_with_spec != request.num_tokens
+            )
+            if suspicious_spec_budget:
+                logger.warning(
+                    "[DEBUG-spec-budget] running_pre_calc req_id=%s "
+                    "num_tokens=%d num_tokens_with_spec=%d "
+                    "num_computed_tokens=%d num_output_placeholders=%d "
+                    "raw_num_new_tokens=%d without_spec=%d spec_len=%d "
+                    "allow_async_spec_reuse=%s is_prefill_chunk=%s token_budget=%d",
+                    request.request_id,
+                    request.num_tokens,
+                    request.num_tokens_with_spec,
+                    request.num_computed_tokens,
+                    request.num_output_placeholders,
+                    raw_num_new_tokens,
+                    request.num_tokens - request.num_computed_tokens,
+                    len(request.spec_token_ids),
+                    request.allow_async_spec_reuse,
+                    request.is_prefill_chunk,
+                    token_budget,
+                )
+            num_new_tokens = raw_num_new_tokens
             if 0 < self.scheduler_config.long_prefill_token_threshold < num_new_tokens:
                 num_new_tokens = self.scheduler_config.long_prefill_token_threshold
             num_new_tokens = min(num_new_tokens, token_budget)
@@ -377,6 +403,16 @@ class Scheduler(SchedulerInterface):
             num_new_tokens = min(
                 num_new_tokens, self.max_model_len - 1 - request.num_computed_tokens
             )
+            if suspicious_spec_budget:
+                logger.warning(
+                    "[DEBUG-spec-budget] running_post_clamp req_id=%s "
+                    "scheduled_num_new_tokens=%d raw_num_new_tokens=%d "
+                    "max_model_len_remaining=%d",
+                    request.request_id,
+                    num_new_tokens,
+                    raw_num_new_tokens,
+                    self.max_model_len - 1 - request.num_computed_tokens,
+                )
 
             # Schedule encoder inputs.
             encoder_inputs_to_schedule = None
@@ -496,10 +532,39 @@ class Scheduler(SchedulerInterface):
                     if len(spec_token_ids) > num_scheduled_spec_tokens:
                         spec_token_ids = spec_token_ids[:num_scheduled_spec_tokens]
                     scheduled_spec_decode_tokens[request.request_id] = spec_token_ids
+                    logger.warning(
+                        "[DEBUG-spec-budget] running_schedule_spec req_id=%s "
+                        "num_scheduled_spec_tokens=%d scheduled_spec_len=%d "
+                        "num_new_tokens=%d num_computed_tokens=%d "
+                        "num_tokens=%d num_output_placeholders=%d",
+                        request.request_id,
+                        num_scheduled_spec_tokens,
+                        len(spec_token_ids),
+                        num_new_tokens,
+                        request.num_computed_tokens,
+                        request.num_tokens,
+                        request.num_output_placeholders,
+                    )
 
                 # New spec tokens will be set in `update_draft_token_ids` before the
                 # next step when applicable.
                 request.spec_token_ids = []
+            elif suspicious_spec_budget:
+                logger.warning(
+                    "[DEBUG-spec-budget] running_skip_spec req_id=%s "
+                    "spec_len=%d is_prefill_chunk=%s allow_async_spec_reuse=%s "
+                    "num_new_tokens=%d num_tokens=%d num_tokens_with_spec=%d "
+                    "num_computed_tokens=%d num_output_placeholders=%d",
+                    request.request_id,
+                    len(request.spec_token_ids),
+                    request.is_prefill_chunk,
+                    request.allow_async_spec_reuse,
+                    num_new_tokens,
+                    request.num_tokens,
+                    request.num_tokens_with_spec,
+                    request.num_computed_tokens,
+                    request.num_output_placeholders,
+                )
 
             # Encoder-related.
             if encoder_inputs_to_schedule:
@@ -950,6 +1015,27 @@ class Scheduler(SchedulerInterface):
             request.is_prefill_chunk = request.num_computed_tokens < (
                 request.num_tokens + request.num_output_placeholders
             )
+            if (
+                request.num_output_placeholders > 0
+                or bool(request.spec_token_ids)
+                or not request.allow_async_spec_reuse
+            ):
+                logger.warning(
+                    "[DEBUG-spec-budget] after_schedule req_id=%s "
+                    "num_scheduled_token=%d num_computed_tokens=%d "
+                    "num_tokens=%d num_tokens_with_spec=%d "
+                    "num_output_placeholders=%d spec_len=%d "
+                    "allow_async_spec_reuse=%s is_prefill_chunk=%s",
+                    req_id,
+                    num_scheduled_token,
+                    request.num_computed_tokens,
+                    request.num_tokens,
+                    request.num_tokens_with_spec,
+                    request.num_output_placeholders,
+                    len(request.spec_token_ids),
+                    request.allow_async_spec_reuse,
+                    request.is_prefill_chunk,
+                )
             scheduler_output.has_structured_output_requests |= (
                 request.use_structured_output and not request.is_prefill_chunk
             )
@@ -974,6 +1060,20 @@ class Scheduler(SchedulerInterface):
         kept_output_tokens = session._all_token_ids[
             session.num_prompt_tokens : num_computed_tokens
         ]
+        logger.warning(
+            "[DEBUG-spec-budget] session_rebuild_before req_id=%s "
+            "num_tokens=%d num_computed_tokens=%d num_prompt_tokens=%d "
+            "num_output_placeholders=%d spec_len=%d allow_async_spec_reuse=%s "
+            "incoming_prompt_len=%d",
+            session.request_id,
+            session.num_tokens,
+            session.num_computed_tokens,
+            session.num_prompt_tokens,
+            session.num_output_placeholders,
+            len(session.spec_token_ids),
+            session.allow_async_spec_reuse,
+            len(update.prompt_token_ids or ()),
+        )
         del session._all_token_ids[num_computed_tokens:]
         session._output_token_ids.clear()
         assert session.prompt_token_ids is not None
@@ -1001,6 +1101,20 @@ class Scheduler(SchedulerInterface):
         if session.status == RequestStatus.WAITING_FOR_STREAMING_REQ:
             self.num_waiting_for_streaming_input -= 1
         session.status = RequestStatus.WAITING
+        logger.warning(
+            "[DEBUG-spec-budget] session_rebuild_after req_id=%s "
+            "num_tokens=%d num_prompt_tokens=%d num_computed_tokens=%d "
+            "num_output_placeholders=%d spec_len=%d allow_async_spec_reuse=%s "
+            "status=%s",
+            session.request_id,
+            session.num_tokens,
+            session.num_prompt_tokens,
+            session.num_computed_tokens,
+            session.num_output_placeholders,
+            len(session.spec_token_ids),
+            session.allow_async_spec_reuse,
+            session.status,
+        )
 
         if self.log_stats:
             session.record_event(EngineCoreEventType.QUEUED)
@@ -1619,6 +1733,16 @@ class Scheduler(SchedulerInterface):
                 # Ignore draft tokens for prefill chunks.
                 if request.spec_token_ids:
                     request.spec_token_ids = []
+                logger.warning(
+                    "[DEBUG-spec-budget] update_draft_skip_prefill req_id=%s "
+                    "incoming_spec_len=%d num_computed_tokens=%d "
+                    "num_tokens=%d num_output_placeholders=%d",
+                    req_id,
+                    len(spec_token_ids),
+                    request.num_computed_tokens,
+                    request.num_tokens,
+                    request.num_output_placeholders,
+                )
                 continue
 
             # Add newly generated spec token ids to the request.
@@ -1627,6 +1751,17 @@ class Scheduler(SchedulerInterface):
                 spec_token_ids = metadata.grammar.validate_tokens(spec_token_ids)  # type: ignore[union-attr]
             request.spec_token_ids = spec_token_ids
             request.allow_async_spec_reuse = True
+            logger.warning(
+                "[DEBUG-spec-budget] update_draft_accept req_id=%s "
+                "spec_len=%d num_tokens=%d num_computed_tokens=%d "
+                "num_output_placeholders=%d allow_async_spec_reuse=%s",
+                req_id,
+                len(spec_token_ids),
+                request.num_tokens,
+                request.num_computed_tokens,
+                request.num_output_placeholders,
+                request.allow_async_spec_reuse,
+            )
 
     def update_draft_token_ids_in_output(
         self, draft_token_ids: DraftTokenIds, scheduler_output: SchedulerOutput
